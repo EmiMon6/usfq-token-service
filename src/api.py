@@ -1,10 +1,11 @@
 """
 API FastAPI para el servicio de extracción de tokens USFQ
-Endpoints para n8n
+Endpoints para n8n - CON AUTENTICACIÓN API KEY
 """
 import os
 import asyncio
-from fastapi import FastAPI, HTTPException
+import secrets
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -31,13 +32,47 @@ app.add_middleware(
 )
 
 # ==========================================
+# Seguridad - API Key
+# ==========================================
+
+def get_api_key():
+    """Obtiene la API Key desde variables de entorno"""
+    return os.getenv("API_KEY", "")
+
+
+async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    """Verifica que la API Key sea válida"""
+    expected_key = get_api_key()
+    
+    if not expected_key:
+        raise HTTPException(
+            status_code=500,
+            detail="API_KEY no configurada en el servidor"
+        )
+    
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Header X-API-Key requerido"
+        )
+    
+    if not secrets.compare_digest(x_api_key, expected_key):
+        raise HTTPException(
+            status_code=403,
+            detail="API Key inválida"
+        )
+    
+    return True
+
+
+# ==========================================
 # Modelos Pydantic
 # ==========================================
 
 class CredentialsRequest(BaseModel):
-    """Credenciales opcionales (si no se usan variables de entorno)"""
-    email: Optional[str] = None
-    password: Optional[str] = None
+    """Credenciales para login"""
+    email: str
+    password: str
 
 
 class TokenResponse(BaseModel):
@@ -50,7 +85,7 @@ class TokenResponse(BaseModel):
 
 
 # ==========================================
-# Endpoints
+# Endpoints PÚBLICOS (sin autenticación)
 # ==========================================
 
 @app.get("/")
@@ -69,70 +104,29 @@ async def health_check():
     return {"status": "healthy"}
 
 
+# ==========================================
+# Endpoints PROTEGIDOS (requieren API Key)
+# ==========================================
+
 @app.post("/api/obtener-tokens", response_model=TokenResponse)
-async def api_obtener_tokens(credentials: Optional[CredentialsRequest] = None):
+async def api_obtener_tokens(
+    credentials: CredentialsRequest,
+    _: bool = Depends(verify_api_key)
+):
     """
     Obtiene los tokens de sesión de USFQ.
     
-    Puede recibir credenciales en el body o usar las variables de entorno:
-    - USFQ_EMAIL
-    - USFQ_PASSWORD
+    Requiere:
+    - Header: X-API-Key (tu API key secreta)
+    - Body: email y password de USFQ
     
     Retorna:
     - d2lSessionVal: Cookie de sesión
     - d2lSecureSessionVal: Cookie de sesión segura
     - csrfToken: Token CSRF para requests
     """
-    # Determinar credenciales a usar
-    email = None
-    password = None
-    
-    if credentials:
-        email = credentials.email
-        password = credentials.password
-    
-    # Si no se pasaron, usar variables de entorno
-    if not email:
-        email = os.getenv("USFQ_EMAIL")
-    if not password:
-        password = os.getenv("USFQ_PASSWORD")
-    
-    # Validar que tenemos credenciales
-    if not email or not password:
-        raise HTTPException(
-            status_code=400,
-            detail="Credenciales requeridas. Envía email/password en el body o configura USFQ_EMAIL/USFQ_PASSWORD"
-        )
-    
     try:
-        # Ejecutar extracción
-        result = await obtener_tokens(email, password)
-        return TokenResponse(**result)
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al extraer tokens: {str(e)}"
-        )
-
-
-@app.get("/api/obtener-tokens", response_model=TokenResponse)
-async def api_obtener_tokens_get():
-    """
-    GET endpoint para obtener tokens usando variables de entorno.
-    Útil para n8n HTTP Request node simple.
-    """
-    email = os.getenv("USFQ_EMAIL")
-    password = os.getenv("USFQ_PASSWORD")
-    
-    if not email or not password:
-        raise HTTPException(
-            status_code=400,
-            detail="Variables de entorno USFQ_EMAIL y USFQ_PASSWORD requeridas"
-        )
-    
-    try:
-        result = await obtener_tokens(email, password)
+        result = await obtener_tokens(credentials.email, credentials.password)
         return TokenResponse(**result)
         
     except Exception as e:
