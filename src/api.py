@@ -3,7 +3,6 @@ API FastAPI para el servicio de extracción de tokens USFQ
 Endpoints para n8n - CON AUTENTICACIÓN API KEY
 """
 import os
-import asyncio
 import secrets
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,12 +68,6 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
 # Modelos Pydantic
 # ==========================================
 
-class CredentialsRequest(BaseModel):
-    """Credenciales para login"""
-    email: str
-    password: str
-
-
 class TokenResponse(BaseModel):
     """Respuesta con los tokens extraídos"""
     success: bool
@@ -105,28 +98,37 @@ async def health_check():
 
 
 # ==========================================
-# Endpoints PROTEGIDOS (requieren API Key)
+# Endpoint PROTEGIDO (requiere API Key)
 # ==========================================
 
-@app.post("/api/obtener-tokens", response_model=TokenResponse)
-async def api_obtener_tokens(
-    credentials: CredentialsRequest,
-    _: bool = Depends(verify_api_key)
-):
+@app.get("/api/obtener-tokens", response_model=TokenResponse)
+async def api_obtener_tokens(_: bool = Depends(verify_api_key)):
     """
     Obtiene los tokens de sesión de USFQ.
     
     Requiere:
     - Header: X-API-Key (tu API key secreta)
-    - Body: email y password de USFQ
+    
+    Las credenciales se toman de las variables de entorno del servidor:
+    - USFQ_EMAIL
+    - USFQ_PASSWORD
     
     Retorna:
     - d2lSessionVal: Cookie de sesión
     - d2lSecureSessionVal: Cookie de sesión segura
     - csrfToken: Token CSRF para requests
     """
+    email = os.getenv("USFQ_EMAIL")
+    password = os.getenv("USFQ_PASSWORD")
+    
+    if not email or not password:
+        raise HTTPException(
+            status_code=500,
+            detail="USFQ_EMAIL y USFQ_PASSWORD no configurados en el servidor"
+        )
+    
     try:
-        result = await obtener_tokens(credentials.email, credentials.password)
+        result = await obtener_tokens(email, password)
         return TokenResponse(**result)
         
     except Exception as e:
