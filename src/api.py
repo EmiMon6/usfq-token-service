@@ -1,27 +1,26 @@
 """
-API FastAPI para el servicio de extracción de tokens USFQ
-Endpoints para n8n - CON AUTENTICACIÓN API KEY
+API FastAPI unificada - USFQ y SRI Token Extractors
 """
 import os
 import secrets
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 from dotenv import load_dotenv
 
-from token_extractor import obtener_tokens
+# Importar extractores
+from token_extractor import obtener_tokens as obtener_tokens_usfq
+from sri_extractor import obtener_tokens_sri
 
-# Cargar variables de entorno
 load_dotenv()
 
 app = FastAPI(
-    title="USFQ Token Extractor API",
-    description="API para extraer cookies y tokens de la plataforma USFQ",
-    version="1.0.0"
+    title="Universal Token Extractor API",
+    description="API para extraer tokens de USFQ y SRI",
+    version="2.0.0"
 )
 
-# CORS para permitir llamadas desde n8n
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,50 +30,55 @@ app.add_middleware(
 )
 
 # ==========================================
-# Seguridad - API Key
+# Seguridad
 # ==========================================
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
-    """Verifica que la API Key sea válida"""
     expected_key = os.getenv("API_KEY", "")
-    
     if not expected_key:
-        raise HTTPException(
-            status_code=500,
-            detail="API_KEY no configurada en el servidor"
-        )
-    
-    if not x_api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Header X-API-Key requerido"
-        )
-    
-    if not secrets.compare_digest(x_api_key, expected_key):
-        raise HTTPException(
-            status_code=403,
-            detail="API Key inválida"
-        )
-    
+        raise HTTPException(status_code=500, detail="API_KEY no configurada")
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected_key):
+        raise HTTPException(status_code=403, detail="API Key inválida")
     return True
-
 
 # ==========================================
 # Modelos
 # ==========================================
 
-class CredentialsRequest(BaseModel):
-    email: str
+class TokenRequest(BaseModel):
+    type: Literal["usfq", "sri"]
+    user: Optional[str] = None      # RUC para SRI
+    email: Optional[str] = None     # Email para USFQ
+    ruc: Optional[str] = None       # Alias para user (SRI)
     password: str
 
-
-class TokenResponse(BaseModel):
+class USFQResponse(BaseModel):
     success: bool
-    d2lSessionVal: str
-    d2lSecureSessionVal: str
-    csrfToken: str
+    d2lSessionVal: Optional[str] = None
+    d2lSecureSessionVal: Optional[str] = None
+    csrfToken: Optional[str] = None
     error: Optional[str] = None
 
+class SRIResponse(BaseModel):
+    success: bool
+    cookie_header: Optional[str] = None
+    view_state: Optional[str] = None
+    final_url: Optional[str] = None
+    error: Optional[str] = None
+
+class UnifiedResponse(BaseModel):
+    success: bool
+    type: str
+    # USFQ fields
+    d2lSessionVal: Optional[str] = None
+    d2lSecureSessionVal: Optional[str] = None
+    csrfToken: Optional[str] = None
+    # SRI fields
+    cookie_header: Optional[str] = None
+    view_state: Optional[str] = None
+    final_url: Optional[str] = None
+    # Error
+    error: Optional[str] = None
 
 # ==========================================
 # Endpoints
@@ -84,39 +88,74 @@ class TokenResponse(BaseModel):
 async def root():
     return {
         "status": "running",
-        "service": "USFQ Token Extractor",
-        "version": "1.0.0"
+        "service": "Universal Token Extractor",
+        "version": "2.0.0",
+        "types": ["usfq", "sri"]
     }
 
-
 @app.get("/health")
-async def health_check():
+async def health():
     return {"status": "healthy"}
 
+@app.post("/api/obtener-tokens", response_model=UnifiedResponse)
+async def api_obtener_tokens(req: TokenRequest, _: bool = Depends(verify_api_key)):
+    """
+    Endpoint unificado para obtener tokens.
+    
+    - type: "usfq" o "sri"
+    - user/email/ruc: identificador del usuario
+    - password: contraseña
+    """
+    # Normalizar usuario
+    username = req.user or req.email or req.ruc
+    if not username:
+        raise HTTPException(status_code=400, detail="Se requiere user, email o ruc")
 
-@app.post("/api/obtener-tokens", response_model=TokenResponse)
-async def api_obtener_tokens(
-    credentials: CredentialsRequest,
-    _: bool = Depends(verify_api_key)
-):
-    """
-    Obtiene los tokens de sesión de USFQ.
-    """
     try:
-        result = await obtener_tokens(credentials.email, credentials.password)
-        return TokenResponse(**result)
+        if req.type == "usfq":
+            result = await obtener_tokens_usfq(username, req.password)
+            return UnifiedResponse(
+                success=result.get("success", False),
+                type="usfq",
+                d2lSessionVal=result.get("d2lSessionVal"),
+                d2lSecureSessionVal=result.get("d2lSecureSessionVal"),
+                csrfToken=result.get("csrfToken"),
+                error=result.get("error")
+            )
+            
+        elif req.type == "sri":
+            result = await obtener_tokens_sri(username, req.password)
+            return UnifiedResponse(
+                success=result.get("success", False),
+                type="sri",
+                cookie_header=result.get("cookie_header"),
+                view_state=result.get("view_state"),
+                final_url=result.get("final_url"),
+                error=result.get("error")
+            )
+            
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al extraer tokens: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
+# Endpoints separados (opcional, para compatibilidad)
+@app.post("/api/usfq", response_model=USFQResponse)
+async def api_usfq(req: TokenRequest, _: bool = Depends(verify_api_key)):
+    """Endpoint específico para USFQ"""
+    username = req.user or req.email or req.ruc
+    if not username:
+        raise HTTPException(status_code=400, detail="Se requiere email")
+    result = await obtener_tokens_usfq(username, req.password)
+    return USFQResponse(**result)
+
+@app.post("/api/sri", response_model=SRIResponse)
+async def api_sri(req: TokenRequest, _: bool = Depends(verify_api_key)):
+    """Endpoint específico para SRI"""
+    username = req.user or req.email or req.ruc
+    if not username:
+        raise HTTPException(status_code=400, detail="Se requiere ruc")
+    result = await obtener_tokens_sri(username, req.password)
+    return SRIResponse(**result)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False
-    )
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=False)
