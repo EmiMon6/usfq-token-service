@@ -263,7 +263,17 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
         }
         
         if proxy_url:
-            launch_kwargs["proxy"] = {"server": proxy_url}
+            from urllib.parse import urlparse
+            p_parsed = urlparse(proxy_url)
+            if p_parsed.username and p_parsed.password:
+                clean_server = f"{p_parsed.scheme}://{p_parsed.hostname}:{p_parsed.port}"
+                launch_kwargs["proxy"] = {
+                    "server": clean_server,
+                    "username": p_parsed.username,
+                    "password": p_parsed.password
+                }
+            else:
+                launch_kwargs["proxy"] = {"server": proxy_url}
 
         browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
