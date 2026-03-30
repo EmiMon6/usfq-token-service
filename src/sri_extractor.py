@@ -319,7 +319,17 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             if err and await err.is_visible():
                 error_text = (await err.inner_text()).strip()
                 logger.error(f"❌ [SRI] Error login: {error_text}")
-                return {"success": False, "error": f"Login fallido: {error_text}"}
+                return [{
+                    "success": False,
+                    "type": "sri",
+                    "d2lSessionVal": None,
+                    "d2lSecureSessionVal": None,
+                    "csrfToken": None,
+                    "cookie_header": None,
+                    "view_state": None,
+                    "final_url": None,
+                    "error": f"Login fallido: {error_text}"
+                }]
 
             # 2) Perfil
             logger.info("⏳ [SRI] Yendo a perfil...")
@@ -346,13 +356,33 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             for t in menu_items:
                 logger.info(f"⏳ [SRI] Clickeando: {t}")
                 if not await click_text_anywhere(page, t):
-                    return {"success": False, "error": f"No se pudo hacer click en: {t}"}
+                    return [{
+                        "success": False,
+                        "type": "sri",
+                        "d2lSessionVal": None,
+                        "d2lSecureSessionVal": None,
+                        "csrfToken": None,
+                        "cookie_header": None,
+                        "view_state": None,
+                        "final_url": None,
+                        "error": f"No se pudo hacer click en: {t}"
+                    }]
                 await page.wait_for_timeout(600)
 
             # 5) Consultar (acción)
             logger.info("⏳ [SRI] Ejecutando Consultar...")
             if not await click_real_consultar(page):
-                return {"success": False, "error": "No se encontró el botón de ACCIÓN 'Consultar'"}
+                return [{
+                    "success": False,
+                    "type": "sri",
+                    "d2lSessionVal": None,
+                    "d2lSecureSessionVal": None,
+                    "csrfToken": None,
+                    "cookie_header": None,
+                    "view_state": None,
+                    "final_url": None,
+                    "error": "No se encontró el botón de ACCIÓN 'Consultar'"
+                }]
 
             # 6) Extraer datos
             try:
@@ -367,16 +397,31 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
 
             logger.info(f"✅ [SRI] Éxito! Cookies: {len(cookie_header)} chars, ViewState: {len(viewstate) if viewstate else 0} chars")
 
-            return {
+            return [{
                 "success": True,
+                "type": "sri",
+                "d2lSessionVal": None,
+                "d2lSecureSessionVal": None,
+                "csrfToken": None,
                 "cookie_header": cookie_header,
                 "view_state": viewstate or "",
-                "final_url": page.url
-            }
+                "final_url": page.url,
+                "error": None
+            }]
 
         except Exception as e:
             logger.error(f"❌ [SRI] Error crítico: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return [{
+                "success": False,
+                "type": "sri",
+                "d2lSessionVal": None,
+                "d2lSecureSessionVal": None,
+                "csrfToken": None,
+                "cookie_header": None,
+                "view_state": None,
+                "final_url": None,
+                "error": str(e)
+            }]
 
         finally:
             await browser.close()
