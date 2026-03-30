@@ -239,21 +239,33 @@ def build_cookie_header_dedup(cookies: list[dict]) -> str:
 async def obtener_tokens_sri(ruc: str, password: str) -> dict:
     """
     Función principal para obtener tokens del SRI.
+    Soporta PROXY_URL como variable de entorno para evitar bloqueos de IP en VPS/EasyPanel.
     Retorna dict con success, cookie_header, view_state, error
     """
+    import os
     logger.info(f"🚀 [SRI] Iniciando extracción para RUC: {ruc}")
+    
+    proxy_url = os.getenv("PROXY_URL")
+    if proxy_url:
+        logger.info("🌐 [SRI] Usando Proxy Server detectado en variables de entorno")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
+        
+        launch_kwargs = {
+            "headless": True,
+            "args": [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--disable-blink-features=AutomationControlled"
-            ],
-        )
+            ]
+        }
+        
+        if proxy_url:
+            launch_kwargs["proxy"] = {"server": proxy_url}
+
+        browser = await p.chromium.launch(**launch_kwargs)
         context = await browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
