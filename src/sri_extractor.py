@@ -266,15 +266,31 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
         context.set_default_timeout(90000)
         page = await context.new_page()
 
+        # [FIX] Stealth
+        try:
+            from playwright_stealth import Stealth
+            await Stealth().apply_stealth_async(page)
+        except ImportError:
+            try:
+                from playwright_stealth import stealth_async
+                await stealth_async(page)
+            except:
+                logger.warning("⚠️ No se pudo cargar playwright_stealth")
+
         try:
             # 1) Login
             logger.info("⏳ [SRI] Navegando al login...")
-            await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=120000)
+            # [FIX] wait_until="commit"
+            await page.goto(LOGIN_URL, wait_until="commit", timeout=120000)
             await page.wait_for_selector("#usuario", state="visible", timeout=30000)
             await page.fill("#usuario", ruc)
             await page.fill("#password", password)
             await page.keyboard.press("Enter")
-            await page.wait_for_load_state("networkidle", timeout=60000)
+            
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except:
+                await page.wait_for_timeout(3000)
 
             # Error Keycloak
             err = await page.query_selector("#kc-error-message")
@@ -285,8 +301,12 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
 
             # 2) Perfil
             logger.info("⏳ [SRI] Yendo a perfil...")
-            await page.goto(PERFIL_URL, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            # [FIX] wait_until="commit"
+            await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except:
+                await page.wait_for_timeout(3000)
             await page.wait_for_timeout(900)
 
             # 3) Menú
@@ -313,7 +333,10 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 return {"success": False, "error": "No se encontró el botón de ACCIÓN 'Consultar'"}
 
             # 6) Extraer datos
-            await page.wait_for_load_state("networkidle", timeout=45000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=30000)
+            except:
+                pass
             await page.wait_for_timeout(800)
 
             viewstate = await get_viewstate(page)
