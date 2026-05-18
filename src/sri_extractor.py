@@ -1,6 +1,6 @@
 """
-SRI Token Extractor - Código proporcionado por usuario
-Navega por el menú del SRI para obtener cookies y ViewState
+SRI Token Extractor
+Navega por el portal SRI para obtener cookies y ViewState
 """
 import asyncio
 import re
@@ -18,11 +18,14 @@ LOGIN_URL = (
 
 PERFIL_URL = "https://srienlinea.sri.gob.ec/sri-en-linea/contribuyente/perfil"
 
+JSF_URL = (
+    "https://srienlinea.sri.gob.ec/comprobantes-electronicos-internet"
+    "/pages/consultas/recuperarComprobantes.jsf"
+)
+
 
 async def get_viewstate(page) -> str | None:
     sel = "input[name='javax.faces.ViewState']"
-    
-    # Página principal
     try:
         loc = page.locator(sel).first
         if await loc.count():
@@ -31,8 +34,6 @@ async def get_viewstate(page) -> str | None:
                 return v
     except:
         pass
-
-    # Frames
     for fr in page.frames:
         try:
             loc = fr.locator(sel).first
@@ -42,7 +43,6 @@ async def get_viewstate(page) -> str | None:
                     return v
         except:
             pass
-
     return None
 
 
@@ -56,7 +56,6 @@ async def click_text_anywhere(page, text: str, timeout=30000) -> bool:
         page.get_by_text(pat, exact=True),
         page.locator(f"text={text}").first,
     ]
-
     for loc in candidates:
         try:
             if await loc.count():
@@ -111,7 +110,6 @@ async def open_left_menu(page) -> bool:
         "[data-testid*='menu' i]",
         "[id*='menu' i]",
     ]
-
     for sel in selectors:
         try:
             loc = page.locator(sel)
@@ -134,7 +132,6 @@ async def open_left_menu(page) -> bool:
         except:
             pass
 
-    # JS click como último recurso
     try:
         clicked = await page.evaluate(
             """
@@ -166,7 +163,6 @@ async def open_left_menu(page) -> bool:
 
 async def click_real_consultar(page) -> bool:
     await page.wait_for_timeout(900)
-
     selectors = [
         "button:has-text('Consultar'):not([role='menuitem']):visible",
         "input[type='submit'][value*='Consultar' i]:visible",
@@ -175,7 +171,6 @@ async def click_real_consultar(page) -> bool:
         "button.ui-button:has-text('Consultar'):visible",
         "form button:has-text('Consultar'):visible",
     ]
-
     for sel in selectors:
         try:
             loc = page.locator(sel)
@@ -192,7 +187,6 @@ async def click_real_consultar(page) -> bool:
                                     continue
                             except:
                                 pass
-
                             await el.scroll_into_view_if_needed(timeout=5000)
                             await el.click(timeout=10000, force=True)
                             await page.wait_for_load_state("networkidle", timeout=45000)
@@ -231,7 +225,6 @@ def build_cookie_header_dedup(cookies: list[dict]) -> str:
     for i, c in enumerate(cookies):
         last_by_name[c["name"]] = c["value"]
         last_pos[c["name"]] = i
-
     names_in_order = [name for name, _ in sorted(last_pos.items(), key=lambda kv: kv[1])]
     return "; ".join(f"{name}={last_by_name[name]}" for name in names_in_order)
 
@@ -244,13 +237,13 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
     """
     import os
     logger.info(f"🚀 [SRI] Iniciando extracción para RUC: {ruc}")
-    
+
     proxy_url = os.getenv("PROXY_URL")
     if proxy_url:
         logger.info("🌐 [SRI] Usando Proxy Server detectado en variables de entorno")
 
     async with async_playwright() as p:
-        
+
         launch_kwargs = {
             "headless": True,
             "args": [
@@ -261,7 +254,7 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 "--disable-blink-features=AutomationControlled"
             ]
         }
-        
+
         if proxy_url:
             from urllib.parse import urlparse
             p_parsed = urlparse(proxy_url)
@@ -288,7 +281,6 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
         context.set_default_timeout(90000)
         page = await context.new_page()
 
-        # [FIX] Stealth
         try:
             from playwright_stealth import Stealth
             await Stealth().apply_stealth_async(page)
@@ -300,13 +292,11 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 logger.warning("⚠️ No se pudo cargar playwright_stealth")
 
         try:
-            # 1) Login
+            # ── 1) LOGIN ──────────────────────────────────────────────────────
             logger.info("⏳ [SRI] Navegando al login...")
-            # [FIX] wait_until="commit"
             await page.goto(LOGIN_URL, wait_until="commit", timeout=120000)
-            # Fix: campos reales del portal SRI
-            # RUC: placeholder="RUC / C.I. / Pasaporte"
-            # Clave: placeholder="Clave"
+
+            # Campos reales del portal: placeholder="RUC / C.I. / Pasaporte" y "Clave"
             selector_ruc = None
             for sel in [
                 'input[placeholder*="RUC"]',
@@ -350,33 +340,73 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             await page.wait_for_timeout(500)
             await page.keyboard.press("Enter")
 
+            # Esperar redirect de Keycloak al portal
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except:
                 await page.wait_for_timeout(5000)
 
-            # Error Keycloak
+            # Error de login
             err = await page.query_selector("#kc-error-message")
             if err and await err.is_visible():
                 error_text = (await err.inner_text()).strip()
                 logger.error(f"❌ [SRI] Error login: {error_text}")
                 return {"success": False, "error": f"Login fallido: {error_text}"}
 
-            # 2) Perfil
-            logger.info("⏳ [SRI] Yendo a perfil...")
+            logger.info(f"⏳ [SRI] Post-login URL: {page.url}")
+
+            # ── 2) ESPERAR QUE EL PORTAL ANGULAR CARGUE ──────────────────────
+            # Keycloak ya redirigió al portal — esperamos que Angular inicialice
+            await page.wait_for_timeout(4000)
+
+            # Si no estamos en el portal, forzar navegación
+            if "sri-en-linea" not in page.url:
+                logger.info("⏳ [SRI] Redirigiendo al portal...")
+                await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=30000)
+                except:
+                    await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(4000)
+
+            logger.info(f"⏳ [SRI] En portal URL: {page.url}")
+
+            # ── 3) INTENTAR IR DIRECTO AL JSF (con sesión activa) ────────────
+            logger.info("⏳ [SRI] Intentando navegación directa al JSF...")
+            await page.goto(JSF_URL, wait_until="domcontentloaded", timeout=60000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=20000)
+            except:
+                await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000)
+
+            # Si el JSF cargó bien (no redirigió a login), extraemos directo
+            if "auth/realms" not in page.url and "login" not in page.url.lower():
+                logger.info(f"✅ [SRI] JSF cargado directamente: {page.url}")
+                viewstate = await get_viewstate(page)
+                cookies = await context.cookies([page.url])
+                cookie_header = build_cookie_header_dedup(cookies)
+                logger.info(f"✅ [SRI] Éxito! Cookies: {len(cookie_header)} chars, ViewState: {len(viewstate) if viewstate else 0} chars")
+                return {
+                    "success": True,
+                    "cookie_header": cookie_header,
+                    "view_state": viewstate or "",
+                    "final_url": page.url,
+                }
+
+            # ── 4) FALLBACK: NAVEGACIÓN POR MENÚ ─────────────────────────────
+            logger.info("⏳ [SRI] JSF requiere menú — navegando al portal...")
             await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except:
                 await page.wait_for_timeout(5000)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(4000)
 
-            # 3) Menú
             logger.info("⏳ [SRI] Abriendo menú...")
             await open_left_menu(page)
             await page.wait_for_timeout(2000)
 
-            # 4) Navegar por menú
             menu_items = [
                 "Facturación electrónica",
                 "Producción",
@@ -390,12 +420,11 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                     return {"success": False, "error": f"No se pudo hacer click en: {t}"}
                 await page.wait_for_timeout(2000)
 
-            # 5) Consultar (acción)
             logger.info("⏳ [SRI] Ejecutando Consultar...")
             if not await click_real_consultar(page):
                 return {"success": False, "error": "No se encontró el botón de ACCIÓN 'Consultar'"}
 
-            # 6) Extraer datos
+            # ── 5) EXTRAER ────────────────────────────────────────────────────
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except:
@@ -412,7 +441,7 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 "success": True,
                 "cookie_header": cookie_header,
                 "view_state": viewstate or "",
-                "final_url": page.url
+                "final_url": page.url,
             }
 
         except Exception as e:
