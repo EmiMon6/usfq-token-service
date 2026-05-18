@@ -345,13 +345,15 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 return {"success": False, "error": "No se encontró el campo Clave"}
 
             await page.fill(selector_ruc, ruc)
+            await page.wait_for_timeout(500)
             await page.fill(selector_pwd, password)
+            await page.wait_for_timeout(500)
             await page.keyboard.press("Enter")
-            
+
             try:
-                await page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
             except:
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)
 
             # Error Keycloak
             err = await page.query_selector("#kc-error-message")
@@ -362,17 +364,17 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
 
             # 2) Perfil
             logger.info("⏳ [SRI] Yendo a perfil...")
-            # [FIX] wait_until="commit"
             await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
             try:
-                await page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_load_state("networkidle", timeout=30000)
             except:
-                await page.wait_for_timeout(3000)
-            await page.wait_for_timeout(900)
+                await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(3000)
 
             # 3) Menú
             logger.info("⏳ [SRI] Abriendo menú...")
             await open_left_menu(page)
+            await page.wait_for_timeout(2000)
 
             # 4) Navegar por menú
             menu_items = [
@@ -386,7 +388,7 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 logger.info(f"⏳ [SRI] Clickeando: {t}")
                 if not await click_text_anywhere(page, t):
                     return {"success": False, "error": f"No se pudo hacer click en: {t}"}
-                await page.wait_for_timeout(600)
+                await page.wait_for_timeout(2000)
 
             # 5) Consultar (acción)
             logger.info("⏳ [SRI] Ejecutando Consultar...")
