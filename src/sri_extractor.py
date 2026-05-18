@@ -304,22 +304,48 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             logger.info("⏳ [SRI] Navegando al login...")
             # [FIX] wait_until="commit"
             await page.goto(LOGIN_URL, wait_until="commit", timeout=120000)
-            # Fix: SRI migró a Keycloak, el campo cambió de #usuario a #username
-            selector_usuario = None
-            for sel in ["#username", "#usuario", 'input[name="username"]']:
+            # Fix: campos reales del portal SRI
+            # RUC: placeholder="RUC / C.I. / Pasaporte"
+            # Clave: placeholder="Clave"
+            selector_ruc = None
+            for sel in [
+                'input[placeholder*="RUC"]',
+                'input[placeholder*="C.I."]',
+                'input[placeholder*="Pasaporte"]',
+                "#ruc", 'input[name="ruc"]',
+                "#username", "#usuario", 'input[name="username"]',
+            ]:
                 try:
                     await page.wait_for_selector(sel, state="visible", timeout=8000)
-                    selector_usuario = sel
-                    logger.info(f"⏳ [SRI] Campo usuario encontrado: {sel}")
+                    selector_ruc = sel
+                    logger.info(f"⏳ [SRI] Campo RUC encontrado: {sel}")
                     break
                 except:
                     continue
 
-            if not selector_usuario:
-                return {"success": False, "error": "No se encontró el campo de usuario (#username / #usuario)"}
+            if not selector_ruc:
+                return {"success": False, "error": "No se encontró el campo RUC / C.I. / Pasaporte"}
 
-            await page.fill(selector_usuario, ruc)
-            await page.fill("#password", password)
+            selector_pwd = None
+            for sel in [
+                'input[placeholder*="Clave"]',
+                'input[placeholder*="clave"]',
+                "#clave", 'input[name="clave"]',
+                "#password", 'input[name="password"]', 'input[type="password"]',
+            ]:
+                try:
+                    await page.wait_for_selector(sel, state="visible", timeout=5000)
+                    selector_pwd = sel
+                    logger.info(f"⏳ [SRI] Campo clave encontrado: {sel}")
+                    break
+                except:
+                    continue
+
+            if not selector_pwd:
+                return {"success": False, "error": "No se encontró el campo Clave"}
+
+            await page.fill(selector_ruc, ruc)
+            await page.fill(selector_pwd, password)
             await page.keyboard.press("Enter")
             
             try:
