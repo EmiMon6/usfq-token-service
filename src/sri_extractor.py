@@ -370,17 +370,17 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             logger.info("⏳ [SRI] Navegando al portal...")
             await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
             try:
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=45000)
             except:
-                await page.wait_for_timeout(5000)
-            await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(8000)
+            await page.wait_for_timeout(8000)
 
             logger.info(f"⏳ [SRI] En portal URL: {page.url}")
 
             # ── 3) NAVEGACIÓN POR MENÚ ────────────────────────────────────────
             logger.info("⏳ [SRI] Abriendo menú...")
             await open_left_menu(page)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(4000)
 
             menu_items = [
                 "Facturación electrónica",
@@ -393,7 +393,7 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 logger.info(f"⏳ [SRI] Clickeando: {t}")
                 if not await click_text_anywhere(page, t):
                     return {"success": False, "error": f"No se pudo hacer click en: {t}"}
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(3000)
 
             logger.info("⏳ [SRI] Ejecutando Consultar...")
             if not await click_real_consultar(page):
