@@ -315,7 +315,13 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                     continue
 
             if not selector_ruc:
-                return {"success": False, "error": "No se encontró el campo RUC / C.I. / Pasaporte"}
+                try:
+                    page_url = page.url
+                    page_title = await page.title()
+                    logger.error(f"❌ [SRI] Página actual: {page_url} | título: {page_title}")
+                except:
+                    page_url, page_title = "desconocido", "desconocido"
+                return {"success": False, "error": f"No se encontró campo RUC — URL: {page_url} | título: {page_title}"}
 
             selector_pwd = None
             for sel in [
