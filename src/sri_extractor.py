@@ -304,8 +304,21 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             logger.info("⏳ [SRI] Navegando al login...")
             # [FIX] wait_until="commit"
             await page.goto(LOGIN_URL, wait_until="commit", timeout=120000)
-            await page.wait_for_selector("#usuario", state="visible", timeout=30000)
-            await page.fill("#usuario", ruc)
+            # Fix: SRI migró a Keycloak, el campo cambió de #usuario a #username
+            selector_usuario = None
+            for sel in ["#username", "#usuario", 'input[name="username"]']:
+                try:
+                    await page.wait_for_selector(sel, state="visible", timeout=8000)
+                    selector_usuario = sel
+                    logger.info(f"⏳ [SRI] Campo usuario encontrado: {sel}")
+                    break
+                except:
+                    continue
+
+            if not selector_usuario:
+                return {"success": False, "error": "No se encontró el campo de usuario (#username / #usuario)"}
+
+            await page.fill(selector_usuario, ruc)
             await page.fill("#password", password)
             await page.keyboard.press("Enter")
             
