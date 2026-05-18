@@ -299,11 +299,12 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             # Campos reales del portal: placeholder="RUC / C.I. / Pasaporte" y "Clave"
             selector_ruc = None
             for sel in [
+                "#usuario",
                 'input[placeholder*="RUC"]',
                 'input[placeholder*="C.I."]',
                 'input[placeholder*="Pasaporte"]',
                 "#ruc", 'input[name="ruc"]',
-                "#username", "#usuario", 'input[name="username"]',
+                "#username", 'input[name="username"]',
             ]:
                 try:
                     await page.wait_for_selector(sel, state="visible", timeout=8000)
@@ -335,9 +336,9 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
                 return {"success": False, "error": "No se encontró el campo Clave"}
 
             await page.fill(selector_ruc, ruc)
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(1000)
             await page.fill(selector_pwd, password)
-            await page.wait_for_timeout(500)
+            await page.wait_for_timeout(2500)
             await page.keyboard.press("Enter")
 
             # Esperar redirect de Keycloak al portal
@@ -346,63 +347,31 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             except:
                 await page.wait_for_timeout(5000)
 
-            # Error de login
-            err = await page.query_selector("#kc-error-message")
-            if err and await err.is_visible():
-                error_text = (await err.inner_text()).strip()
-                logger.error(f"❌ [SRI] Error login: {error_text}")
-                return {"success": False, "error": f"Login fallido: {error_text}"}
+            # Error de login (solo si seguimos en Keycloak)
+            try:
+                if "auth/realms" in page.url:
+                    err = await page.query_selector("#kc-error-message")
+                    if err and await err.is_visible():
+                        error_text = (await err.inner_text()).strip()
+                        logger.error(f"❌ [SRI] Error login: {error_text}")
+                        return {"success": False, "error": f"Login fallido: {error_text}"}
+            except Exception as _e:
+                logger.warning(f"⚠️ No se pudo verificar error login: {_e}")
 
             logger.info(f"⏳ [SRI] Post-login URL: {page.url}")
 
-            # ── 2) ESPERAR QUE EL PORTAL ANGULAR CARGUE ──────────────────────
-            # Keycloak ya redirigió al portal — esperamos que Angular inicialice
-            await page.wait_for_timeout(4000)
-
-            # Si no estamos en el portal, forzar navegación
-            if "sri-en-linea" not in page.url:
-                logger.info("⏳ [SRI] Redirigiendo al portal...")
-                await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=30000)
-                except:
-                    await page.wait_for_timeout(5000)
-                await page.wait_for_timeout(4000)
-
-            logger.info(f"⏳ [SRI] En portal URL: {page.url}")
-
-            # ── 3) INTENTAR IR DIRECTO AL JSF (con sesión activa) ────────────
-            logger.info("⏳ [SRI] Intentando navegación directa al JSF...")
-            await page.goto(JSF_URL, wait_until="domcontentloaded", timeout=60000)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=20000)
-            except:
-                await page.wait_for_timeout(3000)
-            await page.wait_for_timeout(2000)
-
-            # Si el JSF cargó bien (no redirigió a login), extraemos directo
-            if "auth/realms" not in page.url and "login" not in page.url.lower():
-                logger.info(f"✅ [SRI] JSF cargado directamente: {page.url}")
-                viewstate = await get_viewstate(page)
-                cookies = await context.cookies([page.url])
-                cookie_header = build_cookie_header_dedup(cookies)
-                logger.info(f"✅ [SRI] Éxito! Cookies: {len(cookie_header)} chars, ViewState: {len(viewstate) if viewstate else 0} chars")
-                return {
-                    "success": True,
-                    "cookie_header": cookie_header,
-                    "view_state": viewstate or "",
-                    "final_url": page.url,
-                }
-
-            # ── 4) FALLBACK: NAVEGACIÓN POR MENÚ ─────────────────────────────
-            logger.info("⏳ [SRI] JSF requiere menú — navegando al portal...")
+            # ── 2) IR AL PORTAL Y ESPERAR ANGULAR ────────────────────────────
+            logger.info("⏳ [SRI] Navegando al portal...")
             await page.goto(PERFIL_URL, wait_until="commit", timeout=60000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except:
                 await page.wait_for_timeout(5000)
-            await page.wait_for_timeout(4000)
+            await page.wait_for_timeout(5000)
 
+            logger.info(f"⏳ [SRI] En portal URL: {page.url}")
+
+            # ── 3) NAVEGACIÓN POR MENÚ ────────────────────────────────────────
             logger.info("⏳ [SRI] Abriendo menú...")
             await open_left_menu(page)
             await page.wait_for_timeout(2000)
@@ -424,7 +393,7 @@ async def obtener_tokens_sri(ruc: str, password: str) -> dict:
             if not await click_real_consultar(page):
                 return {"success": False, "error": "No se encontró el botón de ACCIÓN 'Consultar'"}
 
-            # ── 5) EXTRAER ────────────────────────────────────────────────────
+            # ── 4) EXTRAER ────────────────────────────────────────────────────
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except:
